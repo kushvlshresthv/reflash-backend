@@ -10,6 +10,15 @@ login() {
   curl -X GET "$BASE_URL/login" -u $USER:$PASS
   echo
 }
+
+
+generate_flashcards() {
+  echo "Fetching cards..."
+  curl -X POST "$BASE_URL/api/ai/generate-flashcards" -u $USER:$PASS | jq
+  echo
+}
+
+
 # # Get incomplete todos
 # incomplete_todos() {
 #   echo "Fetching incomplete todos..."

@@ -5,6 +5,7 @@ public enum ResponseMessage {
     LOGOUT_SUCCESSFUL("Logout successful"),
     AUTHENTICATION_FAILED("Authentication Failed"),
     ACCESS_DENIED("Access Denied"),
+    SUCCESS("Success"),
     ;
     private final String message;
     ResponseMessage(String message) {
