@@ -4,7 +4,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.genai.Client;
 import com.google.genai.types.GenerateContentResponse;
+import com.project.reflash.backend.dto.AIFlashCardGenerationRequestDto;
 import com.project.reflash.backend.dto.Card;
+import com.project.reflash.backend.exception.GeminiApiRateLimitExceededException;
+import com.project.reflash.backend.exception.GeminiResponseParseFailureException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,13 +22,6 @@ public class GeminiService {
 
     private static final String MODEL_NAME = "gemini-2.5-flash";
     private static final int MAX_RETRIES = 3;
-    private static final long INITIAL_RETRY_DELAY_MS = 5000;
-
-    @Value("${gemini.api.key}")
-    private String apiKey;
-
-    private final ObjectMapper objectMapper;
-
     // Sample text about 10-11 lines for generating flashcards
     private static final String SAMPLE_TEXT = """
             The human brain is an incredibly complex organ that serves as the command center for the human nervous system.
@@ -40,14 +36,17 @@ public class GeminiService {
             The brain uses about 20% of the body's total energy despite being only 2% of body weight.
             Neuroplasticity allows the brain to reorganize itself by forming new neural connections throughout life.
             """;
+    private final ObjectMapper objectMapper;
+    @Value("${gemini.api.key}")
+    private String apiKey;
 
     public GeminiService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
-    public List<Card> generateFlashcards() {
-        String prompt = buildPrompt();
-        Exception lastException = null;
+    public List<Card> generateFlashcards(AIFlashCardGenerationRequestDto requestDetails) {
+        //TODO: validate the requestDetails object
+        String finalPrompt = buildPrompt(requestDetails.getText(), requestDetails.getPrompt(), requestDetails.getCount());
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try (Client client = Client.builder().apiKey(apiKey).build()) {
@@ -55,31 +54,21 @@ public class GeminiService {
 
                 GenerateContentResponse response = client.models.generateContent(
                         MODEL_NAME,
-                        prompt,
+                        finalPrompt,
                         null
                 );
 
                 String responseText = response.text();
                 log.info("Successfully received response from Gemini API");
-                //if the json couldn't be parsed, retry as well
                 return parseResponse(responseText);
             } catch (Exception e) {
-                lastException = e;
                 String errorMessage = e.getMessage();
-
+                if (e instanceof GeminiResponseParseFailureException) {
+                    //retry if the response could not be parsed properly
+                    continue;
+                }
                 if (errorMessage != null && errorMessage.contains("429")) {
                     log.warn("Rate limit hit on attempt {}. Waiting before retry...", attempt);
-
-                    if (attempt < MAX_RETRIES) {
-                        //wait for sometime and resend the request
-                        try {
-                            long delayMs = INITIAL_RETRY_DELAY_MS * attempt;
-                            Thread.sleep(delayMs);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            throw new RuntimeException("Interrupted while waiting for retry", ie);
-                        }
-                    }
                 } else {
                     // Non-rate-limit error, don't retry
                     throw new RuntimeException("Failed to generate flashcards: " + e.getMessage(), e);
@@ -88,14 +77,16 @@ public class GeminiService {
         }
 
         // All retries exhausted
-        log.error("All retry attempts exhausted. Last error: {}", lastException != null ? lastException.getMessage() : "unknown");
-        throw new RuntimeException(
-                "Gemini API rate limit exceeded. Please try again later or check your API quota at https://ai.google.dev/gemini-api/docs/rate-limits",
-                lastException
+        log.error("All retry attempts exhausted");
+        throw new GeminiApiRateLimitExceededException(
+                "Gemini API rate limit exceeded. Please try again later or check your API quota at https://ai.google.dev/gemini-api/docs/rate-limits"
         );
     }
 
-    private String buildPrompt() {
+    private String buildPrompt(String text, String prompt, int count) {
+        if(prompt != null && !prompt.isBlank()) {
+            return (prompt + text);
+        }
         return """
                 Based on the following text, generate flashcards in JSON format.
                 Each flashcard should have:
@@ -108,8 +99,15 @@ public class GeminiService {
                 Return ONLY a valid JSON array, no markdown, no explanation. Example format:
                 [{"front": "question", "back": "answer", "additionalContext": "extra info"}]
                 
+                The total number of cards to create is: """ + count + """
+                
+                NOTE: the flashcard generate should be from the text only. Don't include information that are outside the text.
+                
+                If the count is too much compared to the content, you can also generate lesser cards, but don't generate cards that are outside the text please.
+                
+                
                 Text to create flashcards from:
-                """ + SAMPLE_TEXT;
+                """ + text;
     }
 
     private List<Card> parseResponse(String responseText) {
@@ -117,9 +115,10 @@ public class GeminiService {
             // Clean up the response - remove markdown code blocks if present
             String text = responseText.replace("```json", "").replace("```", "").trim();
 
-            return objectMapper.readValue(text, new TypeReference<>() {});
+            return objectMapper.readValue(text, new TypeReference<>() {
+            });
         } catch (Exception e) {
-            throw new RuntimeException("Failed to parse Gemini response: " + e.getMessage(), e);
+            throw new GeminiResponseParseFailureException("Failed to parse Gemini response: " + e.getMessage());
         }
     }
 }

@@ -11,12 +11,62 @@ login() {
   echo
 }
 
-
 generate_flashcards() {
   echo "Fetching cards..."
-  curl -X POST "$BASE_URL/api/ai/generate-flashcards" -u $USER:$PASS | jq
+
+  TEXT=$(cat << 'EOF'
+The human brain is an extraordinarily complex organ responsible for thought and memory.
+It operates through billions of neurons.
+Each neuron communicates using electrical signals.
+Neural connections form vast networks.
+These networks enable learning.
+The brain consumes large amounts of energy.
+Despite its size, it uses about twenty percent of body energy.
+Neuroplasticity allows adaptation.
+Learning strengthens neural pathways.
+Unused connections weaken.
+Memory involves multiple regions.
+Sleep supports memory consolidation.
+Emotions are processed in the limbic system.
+The amygdala regulates fear.
+The prefrontal cortex handles decisions.
+Damage affects cognition.
+Brain development is rapid in childhood.
+Environment shapes growth.
+Language is often lateralized.
+Left hemisphere dominates speech.
+Right hemisphere supports spatial skills.
+Imaging reveals brain activity.
+MRI shows structure.
+EEG measures signals.
+Neuroscience studies consciousness.
+Many disorders remain unexplained.
+Research continues worldwide.
+Better understanding improves medicine.
+Education benefits from brain science.
+Ethics arise from cognition research.
+The brain remains a scientific mystery.
+EOF
+)
+
+  jq -n \
+    --arg text "$TEXT" \
+    --argjson count 50 \
+    '{ text: $text, count: $count }' |
+  curl -X POST "$BASE_URL/api/ai/generate-flashcards" \
+    -u "$USER:$PASS" \
+    -H "Content-Type: application/json" \
+    -d @- | jq
+
   echo
 }
+
+
+# generate_flashcards() {
+#   echo "Fetching cards..."
+#   curl -X POST "$BASE_URL/api/ai/generate-flashcards" -u $USER:$PASS | jq
+#   echo
+# }
 
 
 # # Get incomplete todos
