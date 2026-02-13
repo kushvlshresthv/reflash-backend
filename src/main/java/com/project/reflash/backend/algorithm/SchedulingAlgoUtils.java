@@ -16,6 +16,13 @@ public final class SchedulingAlgoUtils {
         return System.currentTimeMillis() / 1000 * scale;
     }
 
+    /**
+     * Convenience overload — returns the current time in **seconds**.
+     */
+    public static long intTime() {
+        return intTime(1);
+    }
+
 
     /**
      * Returns a unique integer identifier based on the current time in milliseconds.

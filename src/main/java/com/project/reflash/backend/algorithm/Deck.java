@@ -29,6 +29,14 @@ public class Deck {
     private String name;
 
     /**
+     * Back-reference to the parent StudyClass (Anki's "Collection").
+     * The scheduler needs this to access the collection creation timestamp (crt)
+     * for day-offset calculations. Set when the deck is added to a StudyClass
+     * via {@link StudyClass#addDeck(Deck)}.
+     */
+    private StudyClass studyClass;
+
+    /**
      * In-memory list of all cards that belong to this deck.
      */
     private final List<FlashCard> cards;

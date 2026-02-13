@@ -82,6 +82,9 @@ public class StudyClass {
      * @param deck the deck to add.
      */
     public void addDeck(Deck deck) {
+        // Set the back-reference so the deck (and its scheduler) can access
+        // this StudyClass's creation timestamp and other metadata.
+        deck.setStudyClass(this);
         decks.add(deck);
     }
 }
