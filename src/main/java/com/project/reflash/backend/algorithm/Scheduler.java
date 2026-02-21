@@ -34,7 +34,6 @@ public class Scheduler {
     // ── references ────────────────────────────────────────────────────────
 
     /** The deck this scheduler operates on */
-    //NOTE: this portion is a table in the database
     private final Deck deck;
 
     // ── limits ────────────────────────────────────────────────────────────
@@ -43,14 +42,12 @@ public class Scheduler {
      * Upper limit for the number of new + review cards that can be
      * fetched in one study session. Defaults to 50.
      */
-    //NOTE: this variable is is initialized in the backend and used while retrieving the card from the db and sending it to the frontend
     private int queueLimit = 50;
 
     /**
      * Upper limit for the number of learning cards that can be fetched
      * in one study session.
      */
-    //NOTE: this variable is for the backend
     private int reportLimit = 1000;
 
     // ── daily state ───────────────────────────────────────────────────────
@@ -59,7 +56,6 @@ public class Scheduler {
      * The number of cards already reviewed *today*.
      * Reset to 0 each day (or when reset() is called).
      */
-    //NOTE: this is stored in the column associated with a user (along with the date) to track the reps
     private int reps;
 
     /**
@@ -72,7 +68,6 @@ public class Scheduler {
      * Anki calculates this as:
      *   (now - collection.crt) // 86400
      */
-    //Note: this is a variable that is initialized in backend to review cards that are past their due date.
     private int today;
 
     /**
@@ -82,7 +77,6 @@ public class Scheduler {
      * a new day has begun and it should recalculate "today", refill the
      * new/review queues, etc.
      */
-    //NOTE: this variable is initailzed in the frontend and is updated when a new day starts
     private long dayCutoff;
 
     // ── learn-ahead ───────────────────────────────────────────────────────
@@ -95,8 +89,6 @@ public class Scheduler {
      * rather than making the user wait.  Updated via
      * {@link #updateLrnCutoff(boolean)}.
      */
-    //NOTE: this variable is initialized in the frontend and updated every 60 seconds (or if forced)
-    //Note: this variable is used to show learning cards that are nearly in their due date when no other cards are available
     private long lrnCutoff = 0;
 
     /**
@@ -104,7 +96,6 @@ public class Scheduler {
      * In Anki this lives in colConf['collapseTime'] and defaults to
      * 1200 s (= 20 minutes).  We keep it as a simple constant.
      */
-    //NOTE: this variable is initialized in the frontend and used for calculating the lrnCutoff
     private static final int COLLAPSE_TIME = 1200;
 
     // ── deck configuration constants (simplified) ─────────────────────────
@@ -112,14 +103,37 @@ public class Scheduler {
     // deckConf["rev"]["perDay"]. We hardcode sensible defaults.
 
     /** Maximum number of *new* cards to introduce per day. */
-    // NOTE: this should tracked in the backend for returning the new cards on request from the frontend
     private static final int NEW_CARDS_PER_DAY = 20;
 
-
     /** Maximum number of *review* cards to show per day. */
-
-    // NOTE: this should tracked in the backend for returning the review cards on request from the frontend
     private static final int REVIEW_CARDS_PER_DAY = 200;
+
+    // ── learning step configuration ───────────────────────────────────────
+    // In full Anki, these live in deckConf["new"]["delays"] and
+    // deckConf["laps"]["delays"]. We hardcode Anki's defaults.
+
+    /**
+     * Learning steps for NEW cards, in minutes.
+     *
+     * Default Anki config: [1, 10] means:
+     *   Step 1: show again in 1 minute
+     *   Step 2: show again in 10 minutes
+     *   After completing both steps → card graduates to the review queue.
+     *
+     * In Anki this is deckConf["new"]["delays"].
+     */
+    private static final int[] NEW_STEPS = {1, 10};
+
+    /**
+     * Learning steps for LAPSED (relearning) cards, in minutes.
+     *
+     * Default Anki config: [10] means:
+     *   Step 1: show again in 10 minutes
+     *   After completing the step → card returns to the review queue.
+     *
+     * In Anki this is deckConf["laps"]["delays"].
+     */
+    private static final int[] LAPSE_STEPS = {10};
 
     // ── new-card spread setting ───────────────────────────────────────────
     // In Anki, colConf['newSpread'] controls how new cards are mixed in
@@ -143,7 +157,6 @@ public class Scheduler {
      * 1 = show new cards at the end.
      * 2 = show new cards at the start.
      */
-    //NOTE: this variable should be set in the frontend
     private int newSpread = NEW_CARDS_DISTRIBUTE;
 
     // ── card queues ───────────────────────────────────────────────────────
@@ -152,7 +165,6 @@ public class Scheduler {
     // by the _fill*() methods the first time a card is requested.
 
     /** Queue of new cards (queue == NEW), sorted by due, limited to perDay. */
-    //NOTE: this queue is initialized from the backend and also the returned queue is initialized in the frontend to start off the session
     private List<FlashCard> newQueue;
 
     /** Queue of learning cards (queue == LEARNING) that are due soon. */
@@ -170,7 +182,6 @@ public class Scheduler {
      * Calculated by {@link #updateNewCardRatio()} based on the sizes of
      * newQueue and revQueue.
      */
-    //NOTE: this value is initialized in the frontend
     private int newCardModulus = 0;
 
     // -----------------------------------------------------------------------
@@ -188,22 +199,16 @@ public class Scheduler {
      *
      * @param deck the deck whose cards this scheduler will manage.
      */
-    //NOTE: the scheduler is initialized in the frontend
     public Scheduler(Deck deck) {
-        //NOTE: the backend directly sends the queue, so may be this isn't required
         this.deck = deck;
 
         // reps starts at 0 — no cards reviewed yet today.
-        //NOTE: associate this for the user and load this from the database
-        //NOTE: to track the reps in the frontend, and the backend then saves the number into the database when sent
         this.reps = 0;
 
         // Compute the current day number and the cutoff timestamp.
         // These depend on the parent StudyClass's creation time (crt).
         // At construction time the deck may not yet be linked to a StudyClass,
         // so we guard against that and allow re-initialisation via reset().
-
-        //NOTE: today is initialized in the backend to calculate get the review cards who are past their due date
         this.today     = daysSinceCreation();
         this.dayCutoff = computeDayCutoff();
 
@@ -287,9 +292,6 @@ public class Scheduler {
      *              debounce window.
      * @return true if the cutoff was actually updated, false otherwise.
      */
-
-
-    //NOTE: i think this should be implemented in the frontend because this function is called when there are no cards left and review cards should be shown that are almost due instead of leaving the user with no cards to show.
     public boolean updateLrnCutoff(boolean force) {
         long nextCutoff = SchedulingAlgoUtils.intTime() + COLLAPSE_TIME;
 
@@ -320,7 +322,6 @@ public class Scheduler {
         updateCutoff();
 
         // Reset the three queues in the same order Anki does.
-        //when reset is called, reinitialize the queue by sending backend a request
         resetLrn();
         resetRev();
         resetNew();
@@ -334,10 +335,6 @@ public class Scheduler {
      * moves to the next midnight.
      *
      */
-
-    //NOTE: this should be frontend as well
-    //NOTE: everytime a card is retrieved, checkDay() is called and if the updating is required, the following function is run.
-    //NOTE: when the learning-session begins the constructor initializes these variables.
     private void updateCutoff() {
         this.today     = daysSinceCreation();
         this.dayCutoff = computeDayCutoff();
@@ -405,9 +402,10 @@ public class Scheduler {
         newQueue = deck.getCards().stream()
                 .filter(card -> card.getQueue() == CardQueue.NEW)
                 //TODO: here i think the sorting should be done with NoteId as new cards won't have due dates(but in original articles it does say sort new cards by due dates, idk)
-                .sorted(Comparator.comparingLong(FlashCard::getDue))
+                .sorted(Comparator.comparingLong(FlashCard::getId))
                 .limit(limit)
                 .collect(Collectors.toList());
+
         return !newQueue.isEmpty();
     }
 
@@ -481,7 +479,6 @@ public class Scheduler {
         // Filter: queue == LEARNING *and* due timestamp hasn't passed the cutoff.
         // Sort:   by card.id (= creation timestamp → FIFO order).
         // Limit:  reportLimit.
-        //NOTE: here the learning cards are not sorted by their dueDate but their id(which is the creation timestamp)
         lrnQueue = deck.getCards().stream()
                 .filter(card -> card.getQueue() == CardQueue.LEARNING
                         && card.getDue() < cutoff)
@@ -563,8 +560,6 @@ public class Scheduler {
      *
      * Mirrors Anki's Scheduler.getCard().
      */
-
-    //NOTE: this should be implemented in the frontend
     public FlashCard getCard() {
         // If the day has rolled over, reset the queues so that newly-due
         // cards become available.
@@ -601,7 +596,6 @@ public class Scheduler {
      *
      * @return the next due card, or {@code null} if nothing is available.
      */
-    //NOTE: this should be implemented in the frontend as well
     private FlashCard getCardInternal() {
 
         // 1. Learning card due right now?
@@ -658,9 +652,6 @@ public class Scheduler {
      *
      * @return true if a new card should be shown now.
      */
-    //NOTE: it decides whether it is time for the new card based on the mode we are currently in
-
-    //NOTE: we have various modes for new cards lke NEW_CARDS_LAST, NEW_CARDS_FIRST, and DISTRIBUTED as the spread setting in this scheduler as the default
     private boolean timeForNewCard() {
         // No new cards available? Nothing to decide.
         if (newQueue.isEmpty() && !fillNew()) {
@@ -709,18 +700,181 @@ public class Scheduler {
     }
 
     // =====================================================================
-    //  ANSWER CARD (stub — will be implemented in the next step)
+    //  ANSWER CARD — public API
     // =====================================================================
 
     /**
      * Updates the given card after the user has answered.
      *
+     * This is the second core method of the scheduler (alongside getCard).
+     * It dispatches to a specialised handler based on the card's current queue:
+     *
+     *   queue == NEW      → {@link #answerNewCard(FlashCard, int)}
+     *   queue == LEARNING  → {@link #answerLrnCard}  (TODO)
+     *   queue == REVIEW    → {@link #answerRevCard}  (TODO)
+     *
+     * Before dispatching, the card's {@code reps} counter is incremented
+     * (total number of times this card has ever been reviewed).
+     *
      * @param card the card that was reviewed.
-     * @param ease the user's answer:
-     *             0 = Again, 1 = Hard, 2 = Good, 3 = Easy.
-     * (To be implemented.)
+     * @param ease the user's answer (1-based):
+     *             1 = Again, 2 = Hard, 3 = Good, 4 = Easy.
+     * @throws IllegalArgumentException if ease is not in [1, 4] or the
+     *                                  card's queue is unexpected.
      */
+    //NOTE: this should be implemented in the frontend and then update time should be sent to the backend
     public void answerCard(FlashCard card, int ease) {
-        // TODO: implement in next step
+        // Validate inputs — same assertions as Anki:
+        //   assert 1 <= ease <= 4
+        if (ease < 1 || ease > 4) {
+            throw new IllegalArgumentException("ease must be between 1 and 4, got: " + ease);
+        }
+
+        // Increment the card's total review count.
+        card.setReps(card.getReps() + 1);
+
+        // Dispatch based on the card's current queue.
+        if (card.getQueue() == CardQueue.NEW) {
+            // Brand-new card being seen for the first time.
+            answerNewCard(card, ease);
+
+        } else if (card.getQueue() == CardQueue.LEARNING) {
+            // Card is in the learning (or relearning) queue.
+            // TODO: answerLrnCard(card, ease);
+
+        } else if (card.getQueue() == CardQueue.REVIEW) {
+            // Card is in the review queue.
+            // TODO: answerRevCard(card, ease);
+
+        } else {
+            throw new IllegalStateException(
+                    "Unexpected card queue: " + card.getQueue());
+        }
+    }
+
+    // =====================================================================
+    //  ANSWERING NEW CARDS
+    // =====================================================================
+
+    /**
+     * Handles answering a card that is currently in the NEW queue.
+     *
+     * What happens:
+     *   1. Move the card from the NEW queue to the LEARNING queue.
+     *   2. Set the card type to LEARNING.
+     *   3. Initialise the {@code left} field which encodes how many
+     *      learning steps remain (both for today and until graduation).
+     *
+     * After this method, the card is in the learning pipeline and will
+     * be handled by answerLrnCard on subsequent reviews.
+     *
+     * @param card the new card being answered.
+     * @param ease the user's answer (1–4). Not used for new cards because
+     *             the card always moves to LEARNING regardless of ease.
+     */
+    private void answerNewCard(FlashCard card, int ease) {
+        // Move from the NEW queue → LEARNING queue.
+        // Anki does: card.queue = 1; card.type = 1;
+        card.setQueue(CardQueue.LEARNING);
+        card.setType(CardType.LEARNING);
+
+        // Initialise the learning-steps counter.
+        // This tells the scheduler how many steps are left before
+        // the card graduates to the REVIEW queue.
+        card.setLeft(startingLeft(card));
+    }
+
+    // =====================================================================
+    //  LEARNING-STEP HELPERS
+    // =====================================================================
+
+    /**
+     * Returns the learning-step delays for the given card.
+     *
+     * If the card is (re-)learning after a lapse (type == REVIEW or
+     * type == RELEARNING) it uses {@link #LAPSE_STEPS}.
+     * Otherwise it uses {@link #NEW_STEPS}.
+     *
+     * @param card the card.
+     * @return the array of step delays in minutes.
+     */
+    int[] lrnConf(FlashCard card) {
+        // If the card was previously a review card (lapse), use lapse steps.
+        // Otherwise use new-card steps.
+        if (card.getType() == CardType.REVIEW || card.getType() == CardType.RELEARNING) {
+            return LAPSE_STEPS;
+        }
+        return NEW_STEPS;
+    }
+
+    /**
+     * Computes the initial value of the {@code left} field for a card
+     * that is entering the learning queue.
+     *
+     * The left field encodes two numbers as:  {@code  today * 1000 + total_left}
+     *   - total = total number of learning steps (e.g. 2 for [1, 10])
+     *   - today = how many of those steps can be completed before
+     *             the day cutoff ({@link #leftToday}).
+     *
+     * Example with steps [1, 10] starting at 23:55:
+     *   total = 2
+     *   today = 1  (only the 1-min step fits before midnight)
+     *   left  = 1 * 1000 + 2 = 1002
+     *
+     *
+     * @param card the card entering the learning queue.
+     * @return encoded left value.
+     */
+    private int startingLeft(FlashCard card) {
+        int[] delays = lrnConf(card);
+        // Total number of steps until graduation.
+        int total = delays.length;
+        // How many of those steps can be completed today.
+        int today = leftToday(delays, total);
+        // Encode as:  todaySteps * 1000 + totalSteps
+        return today * 1000 + total;
+    }
+
+    /**
+     * Calculates how many learning steps (out of {@code left}) can be
+     * completed before the day cutoff.
+     *
+     * Starting from "now", we walk through the *last* {@code left} delays
+     * (since earlier steps have already been completed) and check if adding
+     * each delay (in minutes → seconds) still lands before {@link #dayCutoff}.
+     *
+     * Example:
+     *   delays = [1, 10],  left = 2,  now = 23:55,  dayCutoff = 00:00
+     *     step 0: now + 1 min  = 23:56  < 00:00 ✓  (ok = 1)
+     *     step 1: now + 10 min = 00:06  > 00:00 ✗  (break)
+     *   → returns 1  (only 1 step fits today)
+     *
+     * @param delays the full array of learning-step delays (in minutes).
+     * @param left   how many steps remain (we use the *last* {@code left}
+     *               entries of the delays array).
+     * @return the number of steps completable before dayCutoff (≥ 1).
+     */
+    private int leftToday(int[] delays, int left) {
+        long now = SchedulingAlgoUtils.intTime();
+
+        // We only care about the last `left` delays.
+        // E.g. if delays=[1,10] and left=2, offset=0 so we start from index 0.
+        // If delays=[1,10] and left=1, offset=1 so we start from index 1 (the 10-min step).
+        int offset = delays.length - left;
+
+        int ok = 0;
+        for (int i = 0; i < left; i++) {
+            // Add the delay (convert minutes → seconds).
+            now += delays[offset + i] * 60L;
+
+            // If this step lands after the day cutoff, stop counting.
+            if (now > dayCutoff) {
+                break;
+            }
+            ok = i + 1;
+        }
+
+        // At least 1 step can always be done today (even if it overflows).
+        return Math.max(ok, 1);
     }
 }
