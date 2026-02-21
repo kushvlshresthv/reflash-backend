@@ -34,6 +34,7 @@ public class Scheduler {
     // ── references ────────────────────────────────────────────────────────
 
     /** The deck this scheduler operates on */
+    //NOTE: this portion is a table in the database
     private final Deck deck;
 
     // ── limits ────────────────────────────────────────────────────────────
@@ -42,12 +43,14 @@ public class Scheduler {
      * Upper limit for the number of new + review cards that can be
      * fetched in one study session. Defaults to 50.
      */
+    //NOTE: this variable is is initialized in the backend and used while retrieving the card from the db and sending it to the frontend
     private int queueLimit = 50;
 
     /**
      * Upper limit for the number of learning cards that can be fetched
      * in one study session.
      */
+    //NOTE: this variable is for the backend
     private int reportLimit = 1000;
 
     // ── daily state ───────────────────────────────────────────────────────
@@ -56,6 +59,7 @@ public class Scheduler {
      * The number of cards already reviewed *today*.
      * Reset to 0 each day (or when reset() is called).
      */
+    //NOTE: this is stored in the column associated with a user (along with the date) to track the reps
     private int reps;
 
     /**
@@ -68,6 +72,7 @@ public class Scheduler {
      * Anki calculates this as:
      *   (now - collection.crt) // 86400
      */
+    //Note: this is a variable that is initialized in backend to review cards that are past their due date.
     private int today;
 
     /**
@@ -77,6 +82,7 @@ public class Scheduler {
      * a new day has begun and it should recalculate "today", refill the
      * new/review queues, etc.
      */
+    //NOTE: this variable is initailzed in the frontend and is updated when a new day starts
     private long dayCutoff;
 
     // ── learn-ahead ───────────────────────────────────────────────────────
@@ -89,6 +95,8 @@ public class Scheduler {
      * rather than making the user wait.  Updated via
      * {@link #updateLrnCutoff(boolean)}.
      */
+    //NOTE: this variable is initialized in the frontend and updated every 60 seconds (or if forced)
+    //Note: this variable is used to show learning cards that are nearly in their due date when no other cards are available
     private long lrnCutoff = 0;
 
     /**
@@ -96,6 +104,7 @@ public class Scheduler {
      * In Anki this lives in colConf['collapseTime'] and defaults to
      * 1200 s (= 20 minutes).  We keep it as a simple constant.
      */
+    //NOTE: this variable is initialized in the frontend and used for calculating the lrnCutoff
     private static final int COLLAPSE_TIME = 1200;
 
     // ── deck configuration constants (simplified) ─────────────────────────
@@ -103,9 +112,13 @@ public class Scheduler {
     // deckConf["rev"]["perDay"]. We hardcode sensible defaults.
 
     /** Maximum number of *new* cards to introduce per day. */
+    // NOTE: this should tracked in the backend for returning the new cards on request from the frontend
     private static final int NEW_CARDS_PER_DAY = 20;
 
+
     /** Maximum number of *review* cards to show per day. */
+
+    // NOTE: this should tracked in the backend for returning the review cards on request from the frontend
     private static final int REVIEW_CARDS_PER_DAY = 200;
 
     // ── new-card spread setting ───────────────────────────────────────────
@@ -114,15 +127,23 @@ public class Scheduler {
     // evenly among reviews" (as opposed to showing them all at the start
     // or end of a session).
 
-    /** Value of newSpread that means "interleave new cards among reviews". */
-    private static final int NEW_CARDS_DISTRIBUTE = 1;
+    /**
+     * newSpread constants — control when new cards appear in a session.
+     *   0 = NEW_CARDS_DISTRIBUTE → interleave new cards among reviews (default).
+     *   1 = NEW_CARDS_LAST       → show new cards after all reviews.
+     *   2 = NEW_CARDS_FIRST      → show new cards before any reviews.
+     */
+    private static final int NEW_CARDS_DISTRIBUTE = 0;
+    private static final int NEW_CARDS_LAST       = 1;
+    private static final int NEW_CARDS_FIRST      = 2;
 
     /**
      * Current newSpread setting.
-     * 0 = show new cards at the end,
-     * 1 = distribute (interleave) new cards among reviews.
-     * We default to DISTRIBUTE so the user gets a mixed session.
+     * 0 = distribute (interleave) new cards among reviews (default).
+     * 1 = show new cards at the end.
+     * 2 = show new cards at the start.
      */
+    //NOTE: this variable should be set in the frontend
     private int newSpread = NEW_CARDS_DISTRIBUTE;
 
     // ── card queues ───────────────────────────────────────────────────────
@@ -131,6 +152,7 @@ public class Scheduler {
     // by the _fill*() methods the first time a card is requested.
 
     /** Queue of new cards (queue == NEW), sorted by due, limited to perDay. */
+    //NOTE: this queue is initialized from the backend and also the returned queue is initialized in the frontend to start off the session
     private List<FlashCard> newQueue;
 
     /** Queue of learning cards (queue == LEARNING) that are due soon. */
@@ -148,6 +170,7 @@ public class Scheduler {
      * Calculated by {@link #updateNewCardRatio()} based on the sizes of
      * newQueue and revQueue.
      */
+    //NOTE: this value is initialized in the frontend
     private int newCardModulus = 0;
 
     // -----------------------------------------------------------------------
@@ -165,16 +188,22 @@ public class Scheduler {
      *
      * @param deck the deck whose cards this scheduler will manage.
      */
+    //NOTE: the scheduler is initialized in the frontend
     public Scheduler(Deck deck) {
+        //NOTE: the backend directly sends the queue, so may be this isn't required
         this.deck = deck;
 
         // reps starts at 0 — no cards reviewed yet today.
+        //NOTE: associate this for the user and load this from the database
+        //NOTE: to track the reps in the frontend, and the backend then saves the number into the database when sent
         this.reps = 0;
 
         // Compute the current day number and the cutoff timestamp.
         // These depend on the parent StudyClass's creation time (crt).
         // At construction time the deck may not yet be linked to a StudyClass,
         // so we guard against that and allow re-initialisation via reset().
+
+        //NOTE: today is initialized in the backend to calculate get the review cards who are past their due date
         this.today     = daysSinceCreation();
         this.dayCutoff = computeDayCutoff();
 
@@ -221,6 +250,9 @@ public class Scheduler {
      *
      * @return epoch seconds of the next midnight boundary.
      */
+
+
+    //TODO: the day cut off is computed in UTC, but this depends on the user and the value is supplied by the service layer, will fix later, let it be like this right now
     private long computeDayCutoff() {
         // Get today's date at midnight in the system's default time zone.
         ZonedDateTime midnight = LocalDate.now()
@@ -255,6 +287,9 @@ public class Scheduler {
      *              debounce window.
      * @return true if the cutoff was actually updated, false otherwise.
      */
+
+
+    //NOTE: i think this should be implemented in the frontend because this function is called when there are no cards left and review cards should be shown that are almost due instead of leaving the user with no cards to show.
     public boolean updateLrnCutoff(boolean force) {
         long nextCutoff = SchedulingAlgoUtils.intTime() + COLLAPSE_TIME;
 
@@ -278,17 +313,51 @@ public class Scheduler {
      * Resets the scheduler's daily state.
      *
      * Called at construction time and whenever a new day is detected.
-     * Recalculates {@code today}, {@code dayCutoff}, and resets counters.
+     * Recalculates {@code today}, {@code dayCutoff}, and resets all queues.
      *
      */
     public void reset() {
-        this.today     = daysSinceCreation();
-        this.dayCutoff = computeDayCutoff();
+        updateCutoff();
 
         // Reset the three queues in the same order Anki does.
+        //when reset is called, reinitialize the queue by sending backend a request
         resetLrn();
         resetRev();
         resetNew();
+    }
+
+    /**
+     * Refreshes the day-related fields: {@code today} and {@code dayCutoff}.
+     *
+     * Called every time the queues are reset (= once per day).
+     * When a new day begins the day counter advances and the cutoff
+     * moves to the next midnight.
+     *
+     */
+
+    //NOTE: this should be frontend as well
+    //NOTE: everytime a card is retrieved, checkDay() is called and if the updating is required, the following function is run.
+    //NOTE: when the learning-session begins the constructor initializes these variables.
+    private void updateCutoff() {
+        this.today     = daysSinceCreation();
+        this.dayCutoff = computeDayCutoff();
+    }
+
+    /**
+     * Checks whether the current day has rolled over past {@code dayCutoff}.
+     *
+     * If the current time exceeds dayCutoff it means a new day has begun,
+     * so we call {@link #reset()} to refresh the day counter and reinitialise
+     * all queues — other cards may now be due.
+     *
+     * This is called at the top of {@link #getCard()} every time a card is
+     * requested, so the transition is seamless even during a long study session.
+     *
+     */
+    private void checkDay() {
+        if (SchedulingAlgoUtils.intTime() > this.dayCutoff) {
+            reset();
+        }
     }
 
     // =====================================================================
@@ -335,10 +404,10 @@ public class Scheduler {
         // Limit:  take at most `limit` cards.
         newQueue = deck.getCards().stream()
                 .filter(card -> card.getQueue() == CardQueue.NEW)
+                //TODO: here i think the sorting should be done with NoteId as new cards won't have due dates(but in original articles it does say sort new cards by due dates, idk)
                 .sorted(Comparator.comparingLong(FlashCard::getDue))
                 .limit(limit)
                 .collect(Collectors.toList());
-
         return !newQueue.isEmpty();
     }
 
@@ -412,6 +481,7 @@ public class Scheduler {
         // Filter: queue == LEARNING *and* due timestamp hasn't passed the cutoff.
         // Sort:   by card.id (= creation timestamp → FIFO order).
         // Limit:  reportLimit.
+        //NOTE: here the learning cards are not sorted by their dueDate but their id(which is the creation timestamp)
         lrnQueue = deck.getCards().stream()
                 .filter(card -> card.getQueue() == CardQueue.LEARNING
                         && card.getDue() < cutoff)
@@ -479,14 +549,168 @@ public class Scheduler {
     }
 
 
+    // =====================================================================
+    //  CARD RETRIEVAL — public API
+    // =====================================================================
+
     /**
-     * Returns the next card to review, or {@code null} if no cards are due.
-     * (To be implemented.)
+     * Returns the next card to study, or {@code null} if the session is over.
+     *
+     * Before fetching a card we check whether a new day has started
+     * (via {@link #checkDay()}).  If a card is returned, the
+     * {@code reps} counter is incremented — this counter drives the
+     * new-card distribution logic ({@link #timeForNewCard()}).
+     *
+     * Mirrors Anki's Scheduler.getCard().
      */
+
+    //NOTE: this should be implemented in the frontend
     public FlashCard getCard() {
-        // TODO: implement in next step
+        // If the day has rolled over, reset the queues so that newly-due
+        // cards become available.
+        checkDay();
+
+        FlashCard card = getCardInternal();
+        if (card != null) {
+            // Increment the session counter.  This is used by
+            // timeForNewCard() to decide when to interleave a new card.
+            reps += 1;
+            return card;
+        }
+        // No cards left — study session is complete.
         return null;
     }
+
+    // =====================================================================
+    //  CARD RETRIEVAL — internal logic
+    // =====================================================================
+
+    /**
+     * Core card-selection logic.  Tries the queues in a carefully chosen
+     * order that mirrors Anki's priority:
+     *
+     *   1. Learning cards that are due right now   (highest priority)
+     *   2. New cards — IF it's "time" for one       (interleave / first)
+     *   3. Review cards
+     *   4. New cards — any remaining                (catch-all)
+     *   5. Learning cards — with collapse           (look-ahead window)
+     *
+     * The first non-null result wins.
+     *
+     * Mirrors Anki's Scheduler._getCard().
+     *
+     * @return the next due card, or {@code null} if nothing is available.
+     */
+    //NOTE: this should be implemented in the frontend as well
+    private FlashCard getCardInternal() {
+
+        // 1. Learning card due right now?
+        FlashCard c = getLrnCard();
+        if (c != null) return c;
+
+        // 2. Is it time to show a new card (distribute / first)?
+        if (timeForNewCard()) {
+            c = getNewCard();
+            if (c != null) return c;
+        }
+
+        // 3. Review card due today?
+        c = getRevCard();
+        if (c != null) return c;
+
+        // 4. Any new cards left (covers NEW_CARDS_LAST and exhausted reviews)?
+        c = getNewCard();
+        if (c != null) return c;
+
+        // 5. Collapse: look ahead for learning cards within the collapse window.
+        //    This avoids ending the session when a learning card is almost due.
+        c = getLrnCard();
+        return c; // may be null → session over
+    }
+
+    // ── new cards ──────────────────────────────────────────────────────────
+
+    /**
+     * Pops and returns the next new card from the queue, or {@code null}.
+     *
+     * The queue is lazily filled by {@link #fillNew()} the first time
+     * this method is called.
+     *
+     */
+    private FlashCard getNewCard() {
+        if (fillNew()) {
+            // Pop the last element (most efficient for an ArrayList).
+            return newQueue.remove(newQueue.size() - 1);
+        }
+        return null;
+    }
+
+    /**
+     * Decides whether it is time to show a new card right now.
+     *
+     * The decision depends on the {@code newSpread} setting:
+     *   - NEW_CARDS_LAST       → never (new cards come after reviews).
+     *   - NEW_CARDS_FIRST      → always (new cards come before reviews).
+     *   - NEW_CARDS_DISTRIBUTE → yes if  reps % newCardModulus == 0
+     *                            (i.e. every N-th card is a new card).
+     *
+     * Mirrors Anki's Scheduler._timeForNewCard().
+     *
+     * @return true if a new card should be shown now.
+     */
+    //NOTE: it decides whether it is time for the new card based on the mode we are currently in
+
+    //NOTE: we have various modes for new cards lke NEW_CARDS_LAST, NEW_CARDS_FIRST, and DISTRIBUTED as the spread setting in this scheduler as the default
+    private boolean timeForNewCard() {
+        // No new cards available? Nothing to decide.
+        if (newQueue.isEmpty() && !fillNew()) {
+            return false;
+        }
+
+        if (newSpread == NEW_CARDS_LAST) {
+            // New cards are shown only after all reviews are done.
+            return false;
+        } else if (newSpread == NEW_CARDS_FIRST) {
+            // New cards are shown before any reviews.
+            return true;
+        } else {
+            // NEW_CARDS_DISTRIBUTE:
+            // Show a new card every `newCardModulus` reviews.
+            // reps is 0-based at this point so the very first card (reps==0)
+            // won't match; that's fine — a learning/review card goes first.
+            return newCardModulus != 0
+                    && reps > 0
+                    && reps % newCardModulus == 0;
+        }
+    }
+
+    // ── learning cards ────────────────────────────────────────────────────
+
+    /**
+     * Pops and returns the next learning card from the queue, or {@code null}.
+     */
+    private FlashCard getLrnCard() {
+        if (fillLrn()) {
+            return lrnQueue.remove(lrnQueue.size() - 1);
+        }
+        return null;
+    }
+
+    // ── review cards ──────────────────────────────────────────────────────
+
+    /**
+     * Pops and returns the next review card from the queue, or {@code null}.
+     */
+    private FlashCard getRevCard() {
+        if (fillRev()) {
+            return revQueue.remove(revQueue.size() - 1);
+        }
+        return null;
+    }
+
+    // =====================================================================
+    //  ANSWER CARD (stub — will be implemented in the next step)
+    // =====================================================================
 
     /**
      * Updates the given card after the user has answered.
