@@ -939,10 +939,18 @@ public class Scheduler {
 
         } else if (ease == 2) {
             // "Hard" — repeat the current step with the same delay.
+            // NOTE: The current card step is repeated. This means the attribute `left` is unchanged. We still have the same number of steps before graduation.
+            // NOTE: The difference is that the card will be scheduled in a delay slightly longer than the previous one. We average the last and next delays [Ex: 1m 10m 20m and we are at step 2 => repeat in 15m)
             repeatStep(card, conf);
 
         } else {
-            // ease == 1, "Again" — back to the very first step.
+            // ease == 1, "Again" — back too the very first step.
+
+            //NOTE: We restore the attribute 'left' as if the card were new
+            //NOTE: We process lapses differently(the RELEARNING cards probably). By default we reset the attribute ivl to 1(next review in one day)(ivl is only applicable for review cards, no?)
+            //NOTE: The card due date is determined by adding the next step to the current date. The card remains in the learning queue(1). (Since the left was set as if the card were new, we are back to the first step.)
+            //NOTE: The delayForGrade() is a helper method to get the next step interval(to calculate the due date). This method extract the number of remaining steps from the attribute 'left' (Ex: 1002 => 2 remaining steps) and uses the setting delay to find the matching delay(Ex: 1m 10m 1d => next study in 10m)
+
             moveToFirstStep(card, conf);
         }
     }
@@ -1038,16 +1046,58 @@ public class Scheduler {
         // Extract total steps remaining from the low 3 digits.
         int stepsRemaining = left % 1000;
 
+        //NOTE: stepsRemaining is initialized with conf.length meaning that at the last step, it is equal '1'. Therefore the following operation does not overflow. (see 'startLeft() implementation above)
+
+        //NOTE: for the first step, stepsRemaining = conf.length and hence 0th index is accessed
         int delayMinutes = conf[conf.length - stepsRemaining];
         // Convert minutes → seconds.
         return delayMinutes * 60L;
     }
 
-
     private void moveToNextStep(FlashCard card, int[] conf) {
     }
 
     private void repeatStep(FlashCard card, int[] conf) {
+        // "Hard" — repeat the current step, but with a slightly longer delay.
+        // Instead of using the exact same delay, we average the current step's
+        // delay with the next step's delay so the wait is a bit longer.
+        long delay = delayForRepeatingGrade(conf, card.getLeft());
+        rescheduleLrnCard(card, conf, delay);
+    }
+
+    /**
+     * Computes the delay for repeating the current step ("Hard" button).
+     *
+     * Takes the average of the current step's delay and the next step's delay.
+     * This makes the user wait a bit longer than the current step but not as
+     * long as the next step.
+     *
+     * Example:
+     *   steps = [1, 10, 20],  currently at step 2 (10 min)
+     *   delay1 = 10 min (current step)
+     *   delay2 = 20 min (next step)
+     *   avg = (10 + max(10, 20)) / 2 = (10 + 20) / 2 = 15 min
+     *
+     * If on the last step (no next step), delay2 will be the same step,
+     * so the average equals the current delay.
+     *
+     * @param conf the step delays array (in minutes).
+     * @param left the card's left field.
+     * @return delay in seconds.
+     */
+    private long delayForRepeatingGrade(int[] conf, int left) {
+        long delay1 = delayForGrade(conf, left);
+        long delay2;
+        int next = (left - 1) % 1000;
+
+        if (next == 0) {
+            delay2 = delay1;
+        } else {
+            delay2 = delayForGrade(conf, left - 1);
+        }
+        // Average of current delay and the larger of the two.
+        // This ensures the result is always >= delay1.
+        return (delay1 + Math.max(delay1, delay2)) / 2;
     }
 
     private void rescheduleAsRev(FlashCard card, int[] conf, boolean early) {
