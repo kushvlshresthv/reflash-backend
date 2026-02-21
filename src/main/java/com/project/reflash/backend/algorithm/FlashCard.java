@@ -81,6 +81,7 @@ public class FlashCard {
         this.crt    = SchedulingAlgoUtils.intTime(1);   // current epoch seconds
         this.type   = CardType.NEW;
         this.queue  = CardQueue.NEW;
+        //NOTE: interval is perhaps for the review card to calculate the time values using the ease factor.
         this.ivl    = 0;
         this.factor = 0;
         this.reps   = 0;

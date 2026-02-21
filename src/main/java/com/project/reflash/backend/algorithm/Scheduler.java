@@ -135,6 +135,27 @@ public class Scheduler {
      */
     private static final int[] LAPSE_STEPS = {10};
 
+    /**
+     * Minimum interval (in days) for a card after a lapse.
+     *
+     * When a review card is answered "Again", its interval gets reduced.
+     * This constant sets a floor so the interval never drops below 1 day.
+     *
+     * In Anki this is deckConf["lapse"]["minInt"].
+     */
+    private static final int LAPSE_MIN_IVL = 1;
+
+    /**
+     * Multiplier applied to the current interval after a lapse.
+     *
+     * E.g. 0 means the interval resets to LAPSE_MIN_IVL.
+     * A value of 0.5 would halve the interval.
+     *
+     * In Anki this is deckConf["lapse"]["mult"].
+     * Default Anki value is 0 (= full reset).
+     */
+    private static final double LAPSE_MULT = 0;
+
     // ── new-card spread setting ───────────────────────────────────────────
     // In Anki, colConf['newSpread'] controls how new cards are mixed in
     // with review cards.  The constant below means "distribute new cards
@@ -740,7 +761,7 @@ public class Scheduler {
 
         } else if (card.getQueue() == CardQueue.LEARNING) {
             // Card is in the learning (or relearning) queue.
-            // TODO: answerLrnCard(card, ease);
+            answerLrnCard(card, ease);
 
         } else if (card.getQueue() == CardQueue.REVIEW) {
             // Card is in the review queue.
@@ -876,5 +897,159 @@ public class Scheduler {
 
         // At least 1 step can always be done today (even if it overflows).
         return Math.max(ok, 1);
+    }
+
+    // =====================================================================
+    //  ANSWERING LEARNING CARDS
+    // =====================================================================
+
+    /**
+     * Handles answering a card that is currently in the LEARNING queue.
+     *
+     * Dispatches to one of four actions based on the ease button:
+     *
+     *   ease 4 (Easy)  → immediately graduate to review queue.
+     *   ease 3 (Good)  → advance to the next step; if no steps remain,
+     *                     graduate to review.
+     *   ease 2 (Hard)  → repeat the current step (same delay again).
+     *   ease 1 (Again) → go back to the first step.
+     *
+     * @param card the learning card being answered.
+     * @param ease 1=Again, 2=Hard, 3=Good, 4=Easy.
+     */
+    private void answerLrnCard(FlashCard card, int ease) {
+        int[] conf = lrnConf(card);
+
+        if (ease == 4) {
+            // "Easy" — skip remaining steps and graduate immediately.
+            rescheduleAsRev(card, conf, true);
+
+        } else if (ease == 3) {
+            // "Good" — check if the card has finished all its steps.
+            // card.left % 1000 gives the total steps remaining.
+            // If only 1 (or 0) step remains, the card graduates.
+            int stepsLeft = card.getLeft() % 1000;
+            if (stepsLeft - 1 <= 0) {
+                // No more steps → graduate to review.
+                rescheduleAsRev(card, conf, false);
+            } else {
+                // More steps remain → move to the next one.
+                moveToNextStep(card, conf);
+            }
+
+        } else if (ease == 2) {
+            // "Hard" — repeat the current step with the same delay.
+            repeatStep(card, conf);
+
+        } else {
+            // ease == 1, "Again" — back to the very first step.
+            moveToFirstStep(card, conf);
+        }
+    }
+
+    // ── Again (ease 1) ────────────────────────────────────────────────────
+
+    /**
+     * Moves the card back to the first learning step.
+     *
+     * @param card the card to reset.
+     * @param conf the step delays array (minutes).
+     */
+    private void moveToFirstStep(FlashCard card, int[] conf) {
+        // Reset the steps counter as if the card is freshly entering learning.
+        card.setLeft(startingLeft(card));
+
+        // If this is a relearning card (a review card that lapsed),
+        // reduce its review interval to reflect the failure.
+        if (card.getType() == CardType.RELEARNING) {
+            updateRevIvlOnFail(card);
+        }
+
+        // Schedule the card for the first step's delay.
+        rescheduleLrnCard(card, conf, null);
+    }
+
+    /**
+     * After a lapse ("Again" on a relearning card), reduce the card's
+     * review interval.
+     *
+     * @param card the lapsed card.
+     */
+    private void updateRevIvlOnFail(FlashCard card) {
+        card.setIvl(lapseIvl(card));
+    }
+
+    /**
+     * Computes the new interval for a card after a lapse.
+     *
+     * Formula:  max(1, minInt, ivl × mult)
+     *
+     * With the default settings (mult=0, minInt=1) this always returns 1,
+     * meaning the card's interval resets to 1 day.
+     *
+     * @param card the lapsed card.
+     * @return the new interval in days (≥ 1).
+     */
+    private int lapseIvl(FlashCard card) {
+        int ivl = (int) (card.getIvl() * LAPSE_MULT);
+        return Math.max(1, Math.max(LAPSE_MIN_IVL, ivl));
+    }
+
+    // ── Scheduling helpers ────────────────────────────────────────────────
+
+    /**
+     * Reschedules a learning card: sets its due date and keeps it in
+     * the LEARNING queue.
+     *
+     * If {@code delay} is {@code null}, the delay is derived from the
+     * card's current step using {@link #delayForGrade}.
+     *
+     * @param card  the card to reschedule.
+     * @param conf  the step delays array (minutes).
+     * @param delay override delay in seconds, or {@code null} to
+     *              use the current step's delay.
+     * @return the delay that was applied (in seconds).
+     */
+    private long rescheduleLrnCard(FlashCard card, int[] conf, Long delay) {
+        if (delay == null) {
+            delay = delayForGrade(conf, card.getLeft());
+        }
+
+        // Set due = now + delay (epoch seconds).
+        card.setDue(SchedulingAlgoUtils.intTime() + delay);
+        // Keep (or move) the card in the learning queue.
+        card.setQueue(CardQueue.LEARNING);
+
+        return delay;
+    }
+
+    /**
+     * Returns the delay in seconds for the current learning step.
+     *
+     * Extracts the number of remaining steps from {@code left}
+     * (the low 3 digits = total steps remaining) and looks up the
+     * matching delay from the conf array.
+     *
+     * @param conf the step delays array (in minutes).
+     * @param left the card's left field.
+     * @return delay in seconds.
+     */
+    private long delayForGrade(int[] conf, int left) {
+        // Extract total steps remaining from the low 3 digits.
+        int stepsRemaining = left % 1000;
+
+        int delayMinutes = conf[conf.length - stepsRemaining];
+        // Convert minutes → seconds.
+        return delayMinutes * 60L;
+    }
+
+
+    private void moveToNextStep(FlashCard card, int[] conf) {
+    }
+
+    private void repeatStep(FlashCard card, int[] conf) {
+    }
+
+    private void rescheduleAsRev(FlashCard card, int[] conf, boolean early) {
     }
 }
