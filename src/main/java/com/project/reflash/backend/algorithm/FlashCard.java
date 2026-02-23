@@ -52,6 +52,7 @@ public class FlashCard {
      *   a = reps remaining today
      *   b = reps remaining until graduation
      */
+    //NOTE: the attribute `left` is particular. The numeric format keeps two pieces of information: how many times the card will be reviewed today, and how many steps before graduation. The methods _startingLeft and _leftToday implement this logic.
     private int left;
 
     /**
