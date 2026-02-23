@@ -40,12 +40,6 @@ public class Scheduler {
 
     // ── limits ────────────────────────────────────────────────────────────
 
-    /**
-     * Upper limit for the number of new + review cards that can be
-     * fetched in one study session. Defaults to 50.
-     */
-    //NOTE: This variable isn't being used properly
-    private int queueLimit = 50;
 
     /**
      * Upper limit for the number of learning cards that can be fetched
@@ -169,6 +163,18 @@ public class Scheduler {
      * Default Anki value is 0 (= full reset).
      */
     private static final double LAPSE_MULT = 0;
+
+    /**
+     * Number of lapses before a card is considered a "leech".
+     *
+     * A leech is a card that keeps being forgotten despite many reviews.
+     * When a card reaches this many lapses, it is automatically suspended
+     * (queue = SUSPENDED) and tagged with "leech" so the user can review
+     * the note and decide what to do with it.
+     *
+     * In Anki this is deckConf["lapse"]["leechFails"].  Default = 8.
+     */
+    private static final int LEECH_FAILS = 8;
 
     /**
      * The initial ease factor assigned to a card when it graduates from
@@ -435,7 +441,7 @@ public class Scheduler {
      *   2. Otherwise, find all cards in the deck whose queue == NEW.
      *   3. Sort them by {@code due} (which equals the note id for new cards,
      *      so they appear in creation order).
-     *   4. Trim to the daily limit: min(queueLimit, NEW_CARDS_PER_DAY).
+     *   4. Trim to the daily limit: NEW_CARDS_PER_DAY.
      *   5. Return true if there are cards to study, false otherwise.
      *
      * @return true if the new-card queue is non-empty after filling.
@@ -447,7 +453,7 @@ public class Scheduler {
         }
 
         // Daily limit for new cards
-        int limit = Math.min(queueLimit, NEW_CARDS_PER_DAY);
+        int limit = NEW_CARDS_PER_DAY;
 
         // Filter: only cards sitting in the NEW queue (queue == 0).
         // Sort:   by due (= note id → creation order).
@@ -581,7 +587,7 @@ public class Scheduler {
             return true;
         }
 
-        int limit = Math.min(queueLimit, REVIEW_CARDS_PER_DAY);
+        int limit = REVIEW_CARDS_PER_DAY)
 
         // Filter: queue == REVIEW and due day has arrived (due <= today).
         // Sort:   by due (so oldest-due cards are picked first).
@@ -774,8 +780,8 @@ public class Scheduler {
      * It dispatches to a specialised handler based on the card's current queue:
      *
      *   queue == NEW      → {@link #answerNewCard(FlashCard, int)}
-     *   queue == LEARNING  → {@link #answerLrnCard}(FlashCard, int)}
-     *   queue == REVIEW    → {@link #answerRevCard}  (TODO)
+     *   queue == LEARNING  → {@link #answerLrnCard(FlashCard, int)}
+     *   queue == REVIEW    → {@link #answerRevCard(FlashCard, int)}
      *
      * Before dispatching, the card's {@code reps} counter is incremented in FlashCard object(not the scheduler which also has reps counter)
      * (total number of times this card has ever been reviewed).
@@ -808,7 +814,7 @@ public class Scheduler {
 
         } else if (card.getQueue() == CardQueue.REVIEW) {
             // Card is in the review queue.
-            // TODO: answerRevCard(card, ease);
+            answerRevCard(card, ease);
 
         } else {
             throw new IllegalStateException(
@@ -1272,5 +1278,129 @@ public class Scheduler {
             // Pressed "Easy" → use the early-graduation interval.
             return EASY_IVL;        // default: 4 days
         }
+    }
+
+    // =====================================================================
+    //  ANSWERING REVIEW CARDS
+    // =====================================================================
+
+    /**
+     * Handles answering a card that is currently in the REVIEW queue.
+     *
+     * Two paths:
+     *   ease == 1 (Again) → the card has lapsed, handle via {@link #rescheduleLapse}.
+     *   ease >= 2          → the card was recalled, reschedule with a new interval.
+     *
+     * @param card the review card being answered.
+     * @param ease 1=Again, 2=Hard, 3=Good, 4=Easy.
+     */
+    private void answerRevCard(FlashCard card, int ease) {
+        if (ease == 1) {
+            rescheduleLapse(card);
+        } else {
+            rescheduleRev(card, ease);
+        }
+    }
+
+    // ── Again (ease 1) — lapse ────────────────────────────────────────────
+
+    /**
+     * Handles a lapse — the user pressed "Again" on a review card.
+     *
+     * What happens:
+     *   1. Increment the card's lapse counter.
+     *   2. Reduce the ease factor by 200 (0.2), floored at 1300 (1.3).
+     *      This follows the SM-2 recommendation: never let ease drop below 1.3.
+     *   3. Check if the card has become a leech (too many lapses).
+     *   4. If NOT suspended as a leech:
+     *        - Keep type = REVIEW (so lrnConf returns LAPSE_STEPS).
+     *        - Move to the first learning step via moveToFirstStep.
+     *   5. If suspended as a leech:
+     *        - No relearning steps; just reduce the interval.
+     *
+     * In Anki:
+     *   def _rescheduleLapse(self, card):
+     *       conf = self.col.deckConf["lapse"]
+     *       card.lapses += 1
+     *       card.factor = max(1300, card.factor - 200)
+     *       suspended = self._checkLeech(card, conf)
+     *       if not suspended:
+     *           card.type = 2
+     *           delay = self._moveToFirstStep(card, conf)
+     *       else:
+     *           self._updateRevIvlOnFail(card, conf)
+     *           delay = 0
+     *       return delay
+     *
+     * @param card the review card that lapsed.
+     */
+    private void rescheduleLapse(FlashCard card) {
+        // 1. Increment lapse counter.
+        card.setLapses(card.getLapses() + 1);
+
+        // 2. Reduce ease factor by 200 (= 0.2 in real terms).
+        //    Floor at 1300 (= 1.3×) as recommended by SM-2.
+        card.setFactor(Math.max(1300, card.getFactor() - 200));
+
+        // 3. Check if the card is now a leech.
+        boolean suspended = checkLeech(card);
+
+        if (!suspended) {
+            // 4a. Not a leech → enter relearning.
+            //     Keep type = REVIEW so that lrnConf() returns LAPSE_STEPS
+            //     and rescheduleAsRev() knows this is a lapse (not a new card).
+
+            //NOTE: here the card type is set to REVIEW seems to be correct
+            //NOTE: in the answerLrnCard, for easy and again options, the card type of REVIEW is checked for special actions on RELEARNING cards
+            card.setType(CardType.REVIEW);
+            moveToFirstStep(card, LAPSE_STEPS);
+        } else {
+            // 4b. Suspended as a leech → no relearning steps.
+            //     Just reduce the review interval for when the user
+            //     eventually unsuspends the card.
+            updateRevIvlOnFail(card);
+        }
+    }
+
+    // ── Leech detection ───────────────────────────────────────────────────
+
+    /**
+     * Checks whether a card has become a leech (too many lapses).
+     *
+     * A leech is a card that the user keeps forgetting. When the lapse
+     * count reaches {@link #LEECH_FAILS}, the card is:
+     *   1. Tagged with "leech" on its note (so the user can find it).
+     *   2. Suspended (queue = SUSPENDED = -1).
+     *
+     * A suspended card is invisible to all fill*() methods — it won't
+     * appear in any queue until the user manually unsuspends it.
+     *
+     * @param card the card to check.
+     * @return true if the card was suspended as a leech, false otherwise.
+     */
+    private boolean checkLeech(FlashCard card) {
+        if (card.getLapses() >= LEECH_FAILS) {
+            // Tag the note so the user can easily find leeches.
+            card.getNote().addTag("leech");
+            // Suspend the card — it will no longer appear in any queue.
+            card.setQueue(CardQueue.SUSPENDED);
+            return true;
+        }
+        return false;
+    }
+
+    // ── Hard / Good / Easy (ease 2-4) — reschedule review ─────────────────
+
+    /**
+     * Reschedules a review card after a successful recall (ease >= 2).
+     *
+     * This is where the SRS interval multiplication and ease factor
+     * adjustment happens. Will be implemented in the next step.
+     *
+     * @param card the review card being rescheduled.
+     * @param ease 2=Hard, 3=Good, 4=Easy.
+     */
+    private void rescheduleRev(FlashCard card, int ease) {
+        // TODO: implement in the next step (interval calculation, ease adjustment, fuzz).
     }
 }
