@@ -156,6 +156,33 @@ public class Scheduler {
      */
     private static final double LAPSE_MULT = 0;
 
+    /**
+     * The initial ease factor assigned to a card when it graduates from
+     * NEW → REVIEW for the first time, in permille.
+     *
+     * 2500 means the interval will be multiplied by 2.5 the next time
+     * the user presses "Good".
+     *
+     * In Anki this is deckConf["new"]["initialFactor"].
+     */
+    private static final int INITIAL_FACTOR = 2500;
+
+    /**
+     * The interval (in days) assigned to a card when it graduates from
+     * learning after completing all steps ("Good" on the last step).
+     *
+     * In Anki this is deckConf["new"]["ints"][0].  Default = 1 day.
+     */
+    private static final int GRADUATING_IVL = 1;
+
+    /**
+     * The interval (in days) assigned to a card when it graduates early
+     * by pressing "Easy" during learning.
+     *
+     * In Anki this is deckConf["new"]["ints"][1].  Default = 4 days.
+     */
+    private static final int EASY_IVL = 4;
+
     // ── new-card spread setting ───────────────────────────────────────────
     // In Anki, colConf['newSpread'] controls how new cards are mixed in
     // with review cards.  The constant below means "distribute new cards
@@ -1054,7 +1081,25 @@ public class Scheduler {
         return delayMinutes * 60L;
     }
 
+    /**
+     * Advances the card to the next learning step ("Good" button, steps remaining).
+     *
+     * Decrements the total-steps counter (low 3 digits of {@code left}) and
+     * recalculates how many of the remaining steps can fit before the day cutoff.
+     *
+     * @param card the card to advance.
+     * @param conf the step delays array (minutes).
+     */
     private void moveToNextStep(FlashCard card, int[] conf) {
+        // Decrement the total number of remaining steps.
+        int left = (card.getLeft() % 1000) - 1;
+
+        // Recalculate how many of those remaining steps can be done today,
+        // and re-encode the left field.
+        card.setLeft(leftToday(conf, left) * 1000 + left);
+
+        // Reschedule with the delay for the new current step.
+        rescheduleLrnCard(card, conf, null);
     }
 
     private void repeatStep(FlashCard card, int[] conf) {
@@ -1090,6 +1135,7 @@ public class Scheduler {
         long delay2;
         int next = (left - 1) % 1000;
 
+        //if this is the last step, delay2 = delay1, else delay2 = next delay option
         if (next == 0) {
             delay2 = delay1;
         } else {
@@ -1100,6 +1146,102 @@ public class Scheduler {
         return (delay1 + Math.max(delay1, delay2)) / 2;
     }
 
+    /**
+     * Graduates a learning card to the REVIEW queue.
+     *
+     * Called when:
+     *   - The user presses "Easy" during learning (early = true).
+     *   - The user presses "Good" on the last learning step (early = false).
+     *
+     * The logic differs depending on whether the card is a lapse
+     * (previously a review card that was forgotten) or a genuinely new card.
+     *
+     * @param card  the card to graduate.
+     * @param conf  the step delays array (minutes).
+     * @param early true if the user pressed "Easy" (skip remaining steps).
+     */
     private void rescheduleAsRev(FlashCard card, int[] conf, boolean early) {
+        // Was this card in the review queue before it lapsed?
+        // card.type tracks the *original* state: REVIEW means it was a review
+        // card that failed and entered relearning.
+        boolean lapse = (card.getType() == CardType.REVIEW);
+
+        if (lapse) {
+            rescheduleGraduatingLapse(card);
+        } else {
+            rescheduleNew(card, conf, early);
+        }
+    }
+
+    /**
+     * Graduates a lapsed card back to the REVIEW queue.
+     *
+     * The interval (ivl) was already reduced by {@link #updateRevIvlOnFail}
+     * when the card first lapsed.  We simply set the due date to
+     * today + that reduced interval.
+     *
+     * In Anki:
+     *   def _rescheduleGraduatingLapse(self, card):
+     *       card.due = self.today + card.ivl
+     *       card.type = card.queue = 2
+     *
+     * @param card the lapsed card being graduated.
+     */
+    private void rescheduleGraduatingLapse(FlashCard card) {
+        // due for review cards = day offset relative to collection creation.
+        card.setDue(this.today + card.getIvl());
+        card.setType(CardType.REVIEW);
+        card.setQueue(CardQueue.REVIEW);
+    }
+
+    /**
+     * Graduates a genuinely new card to the REVIEW queue for the first time.
+     *
+     * Initialises the three key SRS fields:
+     *   - ivl    = graduating interval (1 day for "Good", 4 days for "Easy")
+     *   - due    = today + ivl
+     *   - factor = initial ease factor (2500 = ×2.5)
+     *
+     * @param card  the new card being graduated.
+     * @param conf  the step delays array (minutes) — used indirectly.
+     * @param early true if graduating via "Easy" button.
+     */
+    private void rescheduleNew(FlashCard card, int[] conf, boolean early) {
+        card.setIvl(graduatingIvl(card, conf, early));
+        card.setDue(this.today + card.getIvl());
+        card.setFactor(INITIAL_FACTOR);
+        card.setType(CardType.REVIEW);
+        card.setQueue(CardQueue.REVIEW);
+    }
+
+    /**
+     * Determines the initial interval when a card graduates to review.
+     *
+     * - If the card was already a review/relearning card (lapse), keep its
+     *   current interval.
+     * - If it's a new card graduating normally ("Good"), use GRADUATING_IVL
+     *   (default 1 day).
+     * - If it's a new card graduating early ("Easy"), use EASY_IVL
+     *   (default 4 days).
+     *
+     * @param card  the card.
+     * @param conf  the step delays array (not directly used here).
+     * @param early true if graduating via "Easy".
+     * @return interval in days.
+     */
+    private int graduatingIvl(FlashCard card, int[] conf, boolean early) {
+        // Lapsed cards keep their existing (already-reduced) interval.
+        if (card.getType() == CardType.REVIEW || card.getType() == CardType.RELEARNING) {
+            return card.getIvl();
+        }
+
+        // New card graduating:
+        if (!early) {
+            // Completed all steps → use the normal graduating interval.
+            return GRADUATING_IVL;  // default: 1 day
+        } else {
+            // Pressed "Easy" → use the early-graduation interval.
+            return EASY_IVL;        // default: 4 days
+        }
     }
 }
