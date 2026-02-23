@@ -537,10 +537,12 @@ public class Scheduler {
         // Filter: queue == LEARNING *and* due timestamp hasn't passed the cutoff.
         // Sort:   by card.id (= creation timestamp → FIFO order).
         // Limit:  reportLimit.
+
+        //NEW FIX: sort by due date
         lrnQueue = deck.getCards().stream()
                 .filter(card -> card.getQueue() == CardQueue.LEARNING
                         && card.getDue() < cutoff)
-                .sorted(Comparator.comparingLong(FlashCard::getId))
+                .sorted(Comparator.comparingLong(FlashCard::getDue))
                 .limit(reportLimit)
                 .collect(Collectors.toList());
 
@@ -850,6 +852,9 @@ public class Scheduler {
         // the card graduates to the REVIEW queue.
         //NOTE: this sets the left to the first step of the learning steps
         card.setLeft(startingLeft(card));
+
+        //NOTE: after initializations, answer like a learning card ie if 'easy' was clicked, graduate the card and stuffs
+        answerLrnCard(card, ease);
     }
 
     // =====================================================================
