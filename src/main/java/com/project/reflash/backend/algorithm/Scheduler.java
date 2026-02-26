@@ -199,6 +199,38 @@ public class Scheduler {
     //NOTE: when easy button is clicked, set the graduating interval to EASY_IVL
     private static final int EASY_IVL = 4;
 
+    // ── review configuration constants ────────────────────────────────────
+    // In full Anki, these live in deckConf["rev"].
+
+    /**
+     * Multiplier applied to the interval when the user presses "Hard".
+     *
+     * E.g. 1.2 means the interval grows by 20% on a "Hard" answer.
+     *
+     * In Anki this is deckConf["rev"]["hardFactor"].  Default = 1.2.
+     */
+    private static final double HARD_FACTOR = 1.2;
+
+    /**
+     * Multiplier applied on top of the ease factor when the user presses "Easy".
+     *
+     * E.g. 1.3 means pressing "Easy" gives an extra 30% interval boost
+     * beyond what "Good" would give.
+     *
+     * In Anki this is deckConf["rev"]["ease4"].  Default = 1.3.
+     */
+    private static final double EASY_BONUS = 1.3;
+
+    /**
+     * Absolute maximum interval in days.
+     *
+     * No card will ever be scheduled further out than this.
+     * 36500 days ≈ 100 years.
+     *
+     * In Anki this is deckConf["rev"]["maxIvl"].  Default = 36500.
+     */
+    private static final int MAX_IVL = 36500;
+
     // ── new-card spread setting ───────────────────────────────────────────
     // In Anki, colConf['newSpread'] controls how new cards are mixed in
     // with review cards.  The constant below means "distribute new cards
@@ -1394,13 +1426,138 @@ public class Scheduler {
     /**
      * Reschedules a review card after a successful recall (ease >= 2).
      *
-     * This is where the SRS interval multiplication and ease factor
-     * adjustment happens. Will be implemented in the next step.
+     * Two things happen:
+     *   1. The interval is updated based on the ease button pressed.
+     *   2. The ease factor is adjusted:
+     *        Hard (-150), Good (+0), Easy (+150), floored at 1300.
+     *
+     * Finally, the due date is set to today + new interval.
      *
      * @param card the review card being rescheduled.
      * @param ease 2=Hard, 3=Good, 4=Easy.
      */
     private void rescheduleRev(FlashCard card, int ease) {
-        // TODO: implement in the next step (interval calculation, ease adjustment, fuzz).
+        // 1. Calculate and set the new interval.
+        updateRevIvl(card, ease);
+
+        // 2. Adjust the ease factor.
+        //    Hard (ease=2): -150  →  factor decreases by 0.15
+        //    Good (ease=3): +0    →  factor unchanged
+        //    Easy (ease=4): +150  →  factor increases by 0.15
+        //    Floor at 1300 (= 1.3×) as recommended by SM-2.
+        int[] factorAdj = {-150, 0, 150};
+        card.setFactor(Math.max(1300, card.getFactor() + factorAdj[ease - 2]));
+
+        // 3. Set the due date = today + new interval (day offset).
+        card.setDue(this.today + card.getIvl());
+    }
+
+    /**
+     * Updates the card's interval based on the ease button pressed.
+     */
+    private void updateRevIvl(FlashCard card, int ease) {
+        card.setIvl(nextRevIvl(card, ease));
+    }
+
+    // =====================================================================
+    //  INTERVAL CALCULATION (the core of the SRS)
+    // =====================================================================
+
+    /**
+     * Computes the next review interval for a card, given the ease button.
+     *
+     * This is the heart of the Anki algorithm. Three candidate intervals
+     * are computed (one per button), and each one must be strictly greater
+     * than the previous one so the buttons always offer distinct choices:
+     *
+     *   ivl2 (Hard):  ivl × hardFactor (1.2)
+     *                 Minimum = current ivl (so it never shrinks).
+     *
+     *   ivl3 (Good):  (ivl + delay/2) × factor
+     *                 delay/2 is a "late bonus" — if the card was overdue
+     *                 and still recalled, half of the overdue days are
+     *                 credited as extra interval.
+     *                 Minimum = ivl2 + 1 (must be > Hard).
+     *
+     *   ivl4 (Easy):  (ivl + delay) × factor × easyBonus (1.3)
+     *                 Full late bonus + the easy multiplier.
+     *                 Minimum = ivl3 + 1 (must be > Good).
+     *
+     * All values are clamped to [1, MAX_IVL] by constrainedIvl().
+     *
+     * @param card the review card.
+     * @param ease 2=Hard, 3=Good, 4=Easy.
+     * @return the new interval in days.
+     */
+    private int nextRevIvl(FlashCard card, int ease) {
+        // How many days overdue is this card?
+        int delay = daysLate(card);
+
+        // Current ease factor as a multiplier (e.g. 2500 → 2.5).
+        double fct = card.getFactor() / 1000.0;
+
+        // Current interval.
+        int ivl = card.getIvl();
+
+        // ── Hard (ease 2) ─────────────────────────────────────────────────
+        // Multiply the current interval by hardFactor (1.2).
+        // Minimum = current interval (the card should never shrink on Hard
+        // when hardFactor > 1).
+        int hardMin = HARD_FACTOR > 1 ? ivl : 0;
+        int ivl2 = constrainedIvl(ivl * HARD_FACTOR, hardMin);
+        if (ease == 2) {
+            return ivl2;
+        }
+
+        // ── Good (ease 3) ─────────────────────────────────────────────────
+        // (ivl + delay/2) × factor.
+        // The "delay / 2" is a late bonus: if the card was overdue by 10 days
+        // and still recalled, we credit 5 extra days of proven retention.
+        // Minimum = ivl2 + 1  (so Good is always > Hard).
+        int ivl3 = constrainedIvl((ivl + delay / 2.0) * fct, ivl2);
+        if (ease == 3) {
+            return ivl3;
+        }
+
+        // ── Easy (ease 4) ─────────────────────────────────────────────────
+        // (ivl + delay) × factor × easyBonus.
+        // Full late bonus + the easy multiplier (1.3).
+        // Minimum = ivl3 + 1  (so Easy is always > Good).
+        int ivl4 = constrainedIvl((ivl + delay) * fct * EASY_BONUS, ivl3);
+        return ivl4;
+    }
+
+    /**
+     * Returns how many days late this card was reviewed.
+     *
+     * If the card was reviewed on time or early, returns 0.
+     * If the card was overdue by N days, returns N.
+     *
+     * @param card the review card.
+     * @return days late (≥ 0).
+     */
+    private int daysLate(FlashCard card) {
+        return (int) Math.max(0, this.today - card.getDue());
+    }
+
+    /**
+     * Clamps a candidate interval to valid bounds.
+     *
+     * Rules:
+     *   - Must be at least {@code prev + 1} (so each ease button offers
+     *     a strictly larger interval than the previous one).
+     *   - Must be at least 1 day.
+     *   - Must not exceed {@link #MAX_IVL}.
+     *
+     * @param ivl  the raw candidate interval (may be fractional).
+     * @param prev the interval of the previous (easier) button, or 0.
+     * @return the clamped interval in whole days.
+     */
+    private int constrainedIvl(double ivl, int prev) {
+        // Must be at least prev+1 and at least 1.
+        int result = (int) Math.max(ivl, Math.max(prev + 1, 1));
+        // Cap at the absolute maximum.
+        result = Math.min(result, MAX_IVL);
+        return result;
     }
 }
