@@ -1506,7 +1506,7 @@ public class Scheduler {
         int hardMin = HARD_FACTOR > 1 ? ivl : 0;
         int ivl2 = constrainedIvl(ivl * HARD_FACTOR, hardMin);
         if (ease == 2) {
-            return ivl2;
+            return fuzzedIvl(ivl2);
         }
 
         // ── Good (ease 3) ─────────────────────────────────────────────────
@@ -1516,7 +1516,7 @@ public class Scheduler {
         // Minimum = ivl2 + 1  (so Good is always > Hard).
         int ivl3 = constrainedIvl((ivl + delay / 2.0) * fct, ivl2);
         if (ease == 3) {
-            return ivl3;
+            return fuzzedIvl(ivl3);
         }
 
         // ── Easy (ease 4) ─────────────────────────────────────────────────
@@ -1524,7 +1524,7 @@ public class Scheduler {
         // Full late bonus + the easy multiplier (1.3).
         // Minimum = ivl3 + 1  (so Easy is always > Good).
         int ivl4 = constrainedIvl((ivl + delay) * fct * EASY_BONUS, ivl3);
-        return ivl4;
+        return fuzzedIvl(ivl4);
     }
 
     /**
@@ -1559,5 +1559,67 @@ public class Scheduler {
         // Cap at the absolute maximum.
         result = Math.min(result, MAX_IVL);
         return result;
+    }
+
+    // =====================================================================
+    //  FUZZING
+    // =====================================================================
+
+    /**
+     * Applies a small random "fuzz" to a review interval.
+     *
+     * This prevents cards that were introduced at the same time and given
+     * the same ratings from always coming up for review on the same day.
+     * The fuzz amount scales with the interval:
+     *
+     *   ivl < 2   → no fuzz (always 1)
+     *   ivl == 2  → [2, 3]
+     *   ivl < 7   → ±25% of ivl
+     *   ivl < 30  → ±15% of ivl (at least ±2)
+     *   ivl >= 30 → ±5% of ivl  (at least ±4)
+     *
+     * The fuzz is always at least 1 day.
+     *
+     * @param ivl the interval in days (before fuzzing).
+     * @return the fuzzed interval in days.
+     */
+    private int fuzzedIvl(int ivl) {
+        int[] range = fuzzIvlRange(ivl);
+        // Random integer in [min, max] inclusive.
+        return range[0] + new Random().nextInt(range[1] - range[0] + 1);
+    }
+
+    /**
+     * Computes the [min, max] range for fuzzing a given interval.
+     *
+     * The fuzz factor decreases as intervals grow larger (so long intervals
+     * don't swing wildly), but the absolute fuzz increases:
+     *   - Short intervals (< 7 days):  25% fuzz
+     *   - Medium intervals (< 30 days): 15% fuzz, min 2 days
+     *   - Long intervals (≥ 30 days):   5% fuzz, min 4 days
+     *
+     * @param ivl the interval in days.
+     * @return an int array of [min, max] (inclusive).
+     */
+    private int[] fuzzIvlRange(int ivl) {
+        if (ivl < 2) {
+            return new int[]{1, 1};
+        } else if (ivl == 2) {
+            return new int[]{2, 3};
+        }
+
+        int fuzz;
+        if (ivl < 7) {
+            fuzz = (int) (ivl * 0.25);
+        } else if (ivl < 30) {
+            fuzz = Math.max(2, (int) (ivl * 0.15));
+        } else {
+            fuzz = Math.max(4, (int) (ivl * 0.05));
+        }
+
+        // Fuzz at least 1 day.
+        fuzz = Math.max(fuzz, 1);
+
+        return new int[]{ivl - fuzz, ivl + fuzz};
     }
 }
