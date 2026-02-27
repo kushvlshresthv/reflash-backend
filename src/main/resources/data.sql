@@ -1,3 +1,2 @@
-INSERT INTO app_users (username, password, email, firstname, lastname, timezone, level, xp)
-VALUES ('username', '{noop}password', 'username@gmail.com', 'admin', 'admin', 'Asia/Kathmandu', 1, 0),
-       ('nousername', '{noop}password', 'username@gmail.com', 'admin', 'admin', 'Asia/Kathmandu', 1, 0);
+INSERT INTO app_users (firstname, lastname, grade, section, roll, password, user_role)
+VALUES ('First', 'User', '8', 'A', 13, '{noop}password', 'STUDENT');

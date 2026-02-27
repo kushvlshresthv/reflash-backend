@@ -10,10 +10,6 @@ import java.util.Optional;
 
 @Repository
 public interface AppUserRepository extends JpaRepository<AppUser, Integer> {
-    public Optional<AppUser> findByUsername(String username);
-    public boolean existsByUsername(String username);
-
-
-    @Query("SELECT u.uid from AppUser u WHERE u.username = :username")
-    public int getUserIdFromUsername(String username);
+    @Query("SELECT u from AppUser u WHERE u.grade = :grade AND u.section = :section AND u.roll = :roll")
+    public Optional<AppUser> findUserByGradeSectionAndRoll(String grade, String section, String roll);
 }

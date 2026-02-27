@@ -1,5 +1,7 @@
 package com.project.reflash.backend.service.security;
 
+import lombok.Getter;
+import lombok.Setter;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
@@ -8,12 +10,16 @@ import java.util.List;
 
 public class AppUserDetails implements UserDetails {
     private final Integer userId;
-    private final String username;
+    private final String grade;
+    private final String section;
+    private final String roll;
     private final String password;
 
-    public AppUserDetails(Integer userId, String username, String password ) {
+    public AppUserDetails(Integer userId, String grade,String section, String roll,  String password ) {
         this.userId = userId;
-        this.username = username;
+        this.grade = grade;
+        this.section = section;
+        this.roll = roll;
         this.password = password;
     }
 
@@ -33,6 +39,10 @@ public class AppUserDetails implements UserDetails {
 
     @Override
     public String getUsername() {
-        return username;
+        if(section != null && !section.isBlank())  {
+            return grade + "_" + section + "_" + roll;
+        }
+        return grade + "_" + roll;
     }
+
 }

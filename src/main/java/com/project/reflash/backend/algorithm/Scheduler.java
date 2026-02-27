@@ -619,7 +619,7 @@ public class Scheduler {
             return true;
         }
 
-        int limit = REVIEW_CARDS_PER_DAY)
+        int limit = REVIEW_CARDS_PER_DAY;
 
         // Filter: queue == REVIEW and due day has arrived (due <= today).
         // Sort:   by due (so oldest-due cards are picked first).

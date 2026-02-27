@@ -31,11 +31,14 @@ public class AppUser {
     @Column(name = "lastname")
     String lastName;
 
-    @Column(name = "username")
-    String username;
+    @Column(name="grade")
+    String grade;
 
-    @Column(name = "email")
-    String email;
+    @Column(name="section")
+    String section;
+
+    @Column(name="roll")
+    String roll;
 
     @Column(name = "password")
     String password;

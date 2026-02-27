@@ -24,7 +24,7 @@ public class DatabaseUserDetailsService implements UserDetailsService {
             log.info("UserDetailsService invoked by: {}", username);
 
             if (registeredUser != null) {
-                UserDetails user = new AppUserDetails(registeredUser.getUid(), registeredUser.getUsername(), registeredUser.getPassword());
+                UserDetails user = new AppUserDetails(registeredUser.getUid(), registeredUser.getGrade(), registeredUser.getSection(), registeredUser.getRoll(), registeredUser.getPassword());
                 return user;
             } else {
                 throw new UserDoesNotExistException(ExceptionMessage.USER_DOES_NOT_EXIST);

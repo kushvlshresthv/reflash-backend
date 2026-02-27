@@ -1,6 +1,6 @@
 #!/bin/bash
 
-USER="username"
+USER="8_A_13"
 PASS="password"
 BASE_URL="http://localhost:8080"
 
