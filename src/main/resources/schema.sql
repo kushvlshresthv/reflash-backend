@@ -24,6 +24,7 @@ CREATE TABLE courses
 (
     id            INT AUTO_INCREMENT PRIMARY KEY,
     name          VARCHAR(100) NOT NULL,
+    grade         VARCHAR(10)  NOT NULL,
     academic_year VARCHAR(10)  NOT NULL
 );
 

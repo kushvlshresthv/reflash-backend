@@ -16,8 +16,21 @@ login_teacher() {
   echo "Calling teacher login..."
   curl -X GET "$BASE_URL/login" -u $TCHR:$PASS -H "role: TEACHER"
   echo
+
 }
 
+get_courses_student() {
+  echo "Getting student courses..."
+  curl -X GET "$BASE_URL/api/student/courses" -u $STD:$PASS -H "role:STUDENT"
+  echo
+}
+
+
+get_courses_teacher() {
+  echo "Getting student courses..."
+  curl -X GET "$BASE_URL/api/teacher/courses" -u $TCHR:$PASS -H "role:TEACHER"
+  echo
+}
 
 
 

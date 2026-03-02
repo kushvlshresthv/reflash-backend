@@ -16,15 +16,14 @@ INSERT INTO teachers (firstname, lastname, username, password) VALUES
 -- =============================================
 -- Courses
 -- =============================================
-INSERT INTO courses (id, name, academic_year) VALUES
-(1, 'Mathematics', '2026'),
-(2, 'Science', '2026');
+INSERT INTO courses (id, name, grade, academic_year) VALUES
+(1, 'Mathematics', '10',  '2026'),
+(2, 'Science', '10', '2026');
 
 -- =============================================
 -- Course ↔ Teacher
 -- =============================================
 INSERT INTO course_teacher (course_id, teacher_id) VALUES
-(1, 1),
 (2, 1);
 
 -- =============================================

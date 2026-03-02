@@ -19,6 +19,9 @@ public class Course {
     @Column(name="name", nullable = false)
     String courseName;
 
+    @Column(name="grade", nullable=false)
+    String grade;
+
     @Column(name="academic_year", nullable=false)
     String academicYear;
 
