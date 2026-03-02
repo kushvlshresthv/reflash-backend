@@ -16,9 +16,37 @@ public class Course {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
-    @Column(name="grade_name", nullable = false)
-    String gradeName;
+    @Column(name="name", nullable = false)
+    String courseName;
 
     @Column(name="academic_year", nullable=false)
     String academicYear;
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "course_teacher",
+            inverseJoinColumns = {
+                    @JoinColumn(name = "teacher_id", referencedColumnName = "id"),
+            },
+
+            joinColumns = {
+                    @JoinColumn(name = "course_id", referencedColumnName = "id"),
+            }
+    )
+    List<Teacher> teachers;
+
+
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "course_student",
+            inverseJoinColumns = {
+                    @JoinColumn(name = "student_id", referencedColumnName = "id"),
+            },
+
+            joinColumns = {
+                    @JoinColumn(name = "course_id", referencedColumnName = "id"),
+            }
+    )
+    List<Student> students;
+
+    @OneToMany(mappedBy="course", cascade= CascadeType.ALL, orphanRemoval = true)
+    List<Deck> decks;
 }

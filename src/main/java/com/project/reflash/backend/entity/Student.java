@@ -37,4 +37,7 @@ public class Student {
 
     @Column(name = "academic_year", nullable = false)
     private String academicYear;
+
+    @ManyToMany(mappedBy = "students", fetch = FetchType.LAZY)
+    private List<Course> courses;
 }
