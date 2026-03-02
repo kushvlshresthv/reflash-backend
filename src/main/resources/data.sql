@@ -27,3 +27,7 @@ INSERT INTO enrollments (student_id, grade, section, roll, academic_year) VALUES
 INSERT INTO enrollments (student_id, grade, section, roll, academic_year) VALUES
 (1, '11', 'A', '3', '2027'),
 (2, '11', 'B', '1', '2027');
+
+
+INSERT INTO teachers (firstname, lastname, username, password) VALUES
+('First', 'Teacher', 'username', '{noop}password');

@@ -19,6 +19,13 @@ public class StudentService {
     StudentService(StudentRepository studentRepository) {
         this.studentRepository = studentRepository;
     }
+
+    /**
+     *
+     * @param username
+     * @return Enrollment
+     * @throws UserDoesNotExistException if enrollment with year + grade + section + roll does not exist
+     */
     public Enrollment loadEnrollment(String username) {
         if(username == null || username.isBlank()) {
             throw new UserDoesNotExistException(ExceptionMessage.INVALID_USERNAME);

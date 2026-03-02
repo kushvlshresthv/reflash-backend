@@ -1,15 +1,25 @@
 #!/bin/bash
 
-USER="2026_10_A_1"
+STD="2026_10_A_1"
+TCHR="username"
 PASS="password"
 BASE_URL="http://localhost:8080"
 
 # Login endpoint
-login() {
-  echo "Calling login..."
-  curl -X GET "$BASE_URL/login" -u $USER:$PASS
+login_student() {
+  echo "Calling student login..."
+  curl -X GET "$BASE_URL/login" -u $STD:$PASS -H "role:STUDENT"
   echo
 }
+
+login_teacher() {
+  echo "Calling teacher login..."
+  curl -X GET "$BASE_URL/login" -u $TCHR:$PASS -H "role: TEACHER"
+  echo
+}
+
+
+
 
 generate_flashcards() {
   echo "Fetching cards..."
@@ -54,7 +64,7 @@ EOF
     --argjson count 50 \
     '{ text: $text, count: $count }' |
   curl -X POST "$BASE_URL/api/ai/generate-flashcards" \
-    -u "$USER:$PASS" \
+    -u "$TCHR:$PASS" \
     -H "Content-Type: application/json" \
     -d @- | jq
 

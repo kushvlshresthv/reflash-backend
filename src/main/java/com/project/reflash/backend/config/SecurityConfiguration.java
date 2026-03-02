@@ -3,12 +3,14 @@ package com.project.reflash.backend.config;
 import com.project.reflash.backend.exception_handling.CustomAccessDeniedHandler;
 import com.project.reflash.backend.exception_handling.CustomBasicAuthenticationEntryPoint;
 import com.project.reflash.backend.service.StudentService;
+import com.project.reflash.backend.service.TeacherService;
 import com.project.reflash.backend.service.security.DatabaseUserDetailsService;
 import com.project.reflash.backend.utils.GlobalConstants;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -22,10 +24,14 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfiguration {
 
     @Autowired
     StudentService studentService;
+
+    @Autowired
+    TeacherService teacherService;
     @Bean
     public SecurityFilterChain getSecurityFilterChain(HttpSecurity http) throws Exception {
         http.authorizeHttpRequests((config)-> {
@@ -84,6 +90,6 @@ public class SecurityConfiguration {
     }
     @Bean
     public UserDetailsService userDetailsService() {
-        return new DatabaseUserDetailsService(studentService);
+        return new DatabaseUserDetailsService(studentService, teacherService);
     }
 }

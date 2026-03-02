@@ -1,4 +1,4 @@
-package com.project.reflash.backend.service.security;
+package com.project.reflash.backend.auth.user_details;
 
 import lombok.Getter;
 import org.springframework.security.core.GrantedAuthority;
@@ -18,9 +18,9 @@ public class StudentUserDetails implements UserDetails {
     private final String section;
     private final String roll;
     private final String password;
-    private final String role;
+    private final String role = "ROLE_STUDENT";
 
-    public StudentUserDetails(Integer id, String firstName, String lastName, String academicYear, String grade, String section, String roll, String password, String role ) {
+    public StudentUserDetails(Integer id, String firstName, String lastName, String academicYear, String grade, String section, String roll, String password) {
         this.id = id;
         this.firstName = firstName;
         this.lastName = lastName;
@@ -29,7 +29,6 @@ public class StudentUserDetails implements UserDetails {
         this.section = section;
         this.roll = roll;
         this.password = password;
-        this.role = role;
     }
 
     @Override
@@ -45,7 +44,7 @@ public class StudentUserDetails implements UserDetails {
     @Override
     public String getUsername() {
         //NOTE: grade + section + roll are all mandatory fields in the database
-        if(section.equalsIgnoreCase("NONE")) {
+        if (section.equalsIgnoreCase("NONE")) {
             return academicYear + "_" + grade + "_" + roll;
         }
         return academicYear + "_" + grade + "_" + section + "_" + roll;

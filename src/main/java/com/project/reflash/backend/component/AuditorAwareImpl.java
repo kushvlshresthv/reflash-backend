@@ -1,7 +1,7 @@
 package com.project.reflash.backend.component;
 
 import com.project.reflash.backend.entity.Student;
-import com.project.reflash.backend.service.security.StudentUserDetails;
+import com.project.reflash.backend.auth.user_details.StudentUserDetails;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.AuditorAware;
